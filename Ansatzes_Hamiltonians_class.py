@@ -1,16 +1,13 @@
 # This file contains definitions for 
-# Hamiltonians: XXZ, XY
-# Quantum circuits with different number-conserving gates (equivalently spin conserving)
+# Hamiltonians: XXZ, XY, and HCBH-gauge Hamiltonians
+# Quantum circuits with number-conserving gates
 
 
 # import necessary classes
-from qiskit.quantum_info import Pauli, SparsePauliOp
-from qiskit.circuit import ParameterVector, Parameter
-import numpy as np
-from numpy import kron
-from qiskit.circuit.library import RYGate, RZGate  
 from qiskit import QuantumCircuit
-from qiskit.algorithms import NumPyMinimumEigensolver
+from qiskit.quantum_info import Pauli
+from qiskit.circuit import ParameterVector
+import numpy as np  
 from math import factorial
 
 # classes of Hamiltonians
@@ -19,153 +16,26 @@ class XXZ:
         self.num_sites = num_sites
         self.amp = amp  # the interaction strength amplitude
     
-    # function to rotate a list
-    def rotate_list(self, my_list):
-        x = my_list.pop()
-        my_list.insert(0, x)
-        return my_list
-
-    # tensor product of the list
-    def tensor_the_list(self, list_x):
-        H_x = list_x[0]
-        for i in range(1, self.num_sites):
-            H_x = H_x^list_x[i]
-        return H_x
-        
     # the function that creates the actual Hamiltonian operator
     def Hamiltonian(self):
-        num_sites = self.num_sites
+        n = self.num_sites
         amp = self.amp
 
-        # first define the Paulis
-        X = Pauli('X')
-        Y = Pauli('Y')
-        Z = Pauli('Z')
-        I = Pauli('I')
-                
-        # The lists below define lists of the first terms in the XXZ Hamiltonian that we want to create: 
-        # e.g. the first term involving X is X_1 x X_2 x I_3 x ... x I_n with X on sites 1 and 2
-        list_x = [X,X] + [I for i in range(num_sites-2)]
-        list_y = [Y,Y] + [I for i in range(num_sites-2)]
-        list_z = [Z,Z] + [I for i in range(num_sites-2)]                
-        
-        # make the Hamiltonian using the lists above: l_X, l_Y, l_Z     
-        xx = self.tensor_the_list(list_x).to_label()
-        yy = self.tensor_the_list(list_y).to_label()
-        zz = self.tensor_the_list(list_z).to_label()
-        H = [(xx, 1), (yy, 1), (zz, amp)]
-     
-        # add the next terms of the Hamiltonian
-        for i in range(2,num_sites):
-            # rotate the list to advance the interaction terms to new sites
-            list_x = self.rotate_list(list_x)
-            list_y = self.rotate_list(list_y)
-            list_z = self.rotate_list(list_z)
-            
-            # make tensor product and add the terms. Update the Hamiltonian
-            xx = self.tensor_the_list(list_x).to_label()
-            yy = self.tensor_the_list(list_y).to_label()
-            zz = self.tensor_the_list(list_z).to_label()
-            #H = [(xx, 1), (yy,1), (zz, gamma)]
-        
-            H.append((xx, 1))
-            H.append((yy, 1))
-            H.append((zz, amp))
-                                    
+        H_xx = [('I'*k + 'XX' + 'I'*(n-2-k), 1) for k in range(n-1)]    
+        H_yy = [('I'*k + 'YY' + 'I'*(n-2-k), 1) for k in range(n-1)]    
+        H_zz = [('I'*k + 'ZZ' + 'I'*(n-2-k), amp) for k in range(n-1)]    
+
+        H = H_xx + H_yy + H_zz
+                         
         return H
-        
+
     # method to get the exact ground state energy
     def get_minimum_eigenvalue(self, H_matrix):
         # Use only for small system sizes to get the reference ground state energy
         ref_value = np.real(np.linalg.eigvals(H_matrix).min())        
         return ref_value
-
-
-class HCBH_ladder_gauged:
-    def __init__(self, num_sites, alpha_gauge) -> None:
-        self.dim_x = int(num_sites/2)
-        self.num_sites = num_sites
-        self.alpha_gauge = alpha_gauge
-        
-        # interaction strengths
-        self.J_1 = 1;  # lower leg
-        self.J_2 = 1;  # upper leg
-        self.J_v = 1   # rungs
-
-    def string_the_list(self, I_list):
-        st = ''
-        for ch in I_list:
-            st = st + ch
-        return st
-
-    def Hamiltonian(self):
-        L = self.num_sites
-        L_x = self.dim_x
-        J_1 = self.J_1; J_2 = self.J_2; J_v = self.J_v; 
-        alpha_gauge = self.alpha_gauge
-
-        # start with an empty string of I's
-        I_g = ['I' for i in range(L)]
-        H = []
-
-        # Bond interactions on lower and upper legs
-        for i in range(L_x-1):
-            ## XX and YY bond interaction terms on lower leg
-            # Note: the gauge field on the lower leg is zero and hence does not have any effect 
-            xix = I_g.copy(); yiy = I_g.copy()
-            xix[2*i] = 'X'; xix[2*i+2] = 'X'
-            yiy[2*i] = 'Y'; yiy[2*i+2] = 'Y'
-            xix = self.string_the_list(xix)
-            yiy = self.string_the_list(yiy)
-            int_val = -J_1/2  
-            H.append((xix, int_val))
-            H.append((yiy, int_val))
-        
-            ## bond interaction terms on upper leg
-            # The gauge used is nonzero only for the upper leg
-            g_val = -2*np.pi*alpha_gauge*(-1)**i
-
-            # the "dot product" between X and Y on sites i,j
-            xix = I_g.copy();  yiy = I_g.copy()
-            xix[2*i+1] = 'X'; xix[2*i+3] = 'X'
-            yiy[2*i+1] = 'Y'; yiy[2*i+3] = 'Y'
-            xix = self.string_the_list(xix)
-            yiy = self.string_the_list(yiy)
-            int_val = -np.cos(g_val)*J_2/2   
-            H.append((xix, int_val))
-            H.append((yiy, int_val))
-
-            # the "cross product" between X and Y on sites i,j
-            xiy = I_g.copy();  yix = I_g.copy()
-            xiy[2*i+1] = 'X'; xiy[2*i+3] = 'Y'
-            yix[2*i+1] = 'Y'; yix[2*i+3] = 'X'
-            xiy = self.string_the_list(xiy)
-            yix = self.string_the_list(yix)
-            int_val = np.sin(g_val)*J_2/2  
-            H.append((xiy, int_val))
-            H.append((yix, -int_val))
-
-        # rung terms 
-        # gauge field is also zero on the rungs 
-        for i in range(L_x):
-            xx = I_g.copy(); yy = I_g.copy()
-            xx[2*i] = 'X'; xx[2*i+1] = 'X'
-            yy[2*i] = 'Y'; yy[2*i+1] = 'Y'
-            xx = self.string_the_list(xx)
-            yy = self.string_the_list(yy)
-            int_val = -J_v/2
-            H.append((xx, int_val))
-            H.append((yy, int_val))
-
-        return H
-
-    # @@@ not best to duplicate this function across classes. Improve!
-    def get_minimum_eigenvalue(self, H_matrix):
-        # Use only for small system sizes to get the reference ground state energy
-        ref_value = np.real(np.linalg.eigvals(H_matrix).min())        
-        return ref_value
-
     
+
 # the circuit ansatze class
 class AnsatzCircuit(QuantumCircuit): 
     def __init__(self, 
@@ -259,8 +129,10 @@ class AnsatzCircuit(QuantumCircuit):
           
         
     def generate_sites_for_initial_state(self, num_sites):
-        # we generate the sites to place the x gates for the case of num_sites odd
-        # The case of even num of sites can be obtained easily by shiting 
+        # we generate the sites to place the x gates for the case of odd no. of sites
+        # The case of even no. of sites can be obtained easily by shiting 
+        #
+        # The "particles" are initialized to be as maximally separated as possible
     
         from math import floor
     
@@ -358,7 +230,6 @@ class AnsatzCircuit(QuantumCircuit):
                 for bond in bonds:
                     gate = self.B_gate(np.pi/4, 0) 
                     self.append(gate, [bond[0], bond[1]])             
-
                 
     
     def get_circuit_BWC(self):               
@@ -370,8 +241,7 @@ class AnsatzCircuit(QuantumCircuit):
     
         # create initial state
         self.create_initial_state()
-       
-        
+               
         # -- second, create the brickwall circuit: apply gates on odd and even bonds --                
         
         # calculate the number of gates needed. This depends on the number of parameters per gate
